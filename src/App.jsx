@@ -137,7 +137,8 @@ export default function ProfeSol() {
 
   async function sendMessage(text, img) {
     const userText = text || input.trim();
-    if (loading || (!userText && !img && !pendingImage)) return;
+    if (loading) return;
+    if (!userText && !img && !pendingImage) return;
     const imageToSend = img !== undefined ? img : pendingImage;
     setInput("");
     setPendingImage(null);
@@ -149,23 +150,44 @@ export default function ProfeSol() {
     if (userText) newChats[curSub] = [...newChats[curSub], { role: "user", content: userText }];
     setChats(newChats);
 
-    const history = newChats[curSub].filter(m => m.role !== "image-preview");
-    const apiMsgs = history.map(m => ({ role: m.role, content: m.content }));
-
+    // Construir mensajes para la API - solo alternar user/assistant correctamente
+    const history = newChats[curSub].filter(m => m.role === "user" || m.role === "assistant");
+    
+    // Si hay imagen, armar el último mensaje de usuario con contenido multimodal
+    let apiMsgs = history.map(m => ({ role: m.role, content: m.content }));
+    
     if (imageToSend) {
-      const lastU = apiMsgs.map(m => m.role).lastIndexOf("user");
-      const textPart = userText ? [{ type: "text", text: userText }] : [];
-      const promptPart = userText ? [] : [{ type: "text", text: "Mirá este examen o tarea. Explicale a Cata cada ejercicio uno por uno, de forma muy simple. Preguntale por cuál quiere empezar." }];
-      const content = [{ type: "image", source: { type: "base64", media_type: imageToSend.mediaType, data: imageToSend.base64 } }, ...textPart, ...promptPart];
-      if (lastU >= 0) apiMsgs[lastU] = { role: "user", content };
-      else apiMsgs.push({ role: "user", content });
+      const imageContent = [
+        { type: "image", source: { type: "base64", media_type: imageToSend.mediaType, data: imageToSend.base64 } },
+        { type: "text", text: userText || "Mirá este examen. Describí qué ejercicios tiene y explicale a Cata el primero de forma muy simple." }
+      ];
+      // Reemplazar el último mensaje de usuario con la imagen
+      const lastUserIdx = apiMsgs.map(m => m.role).lastIndexOf("user");
+      if (lastUserIdx >= 0) {
+        apiMsgs[lastUserIdx] = { role: "user", content: imageContent };
+      } else {
+        apiMsgs.push({ role: "user", content: imageContent });
+      }
+    }
+
+    // Asegurarse que no termina con assistant
+    while (apiMsgs.length > 0 && apiMsgs[apiMsgs.length - 1].role === "assistant") {
+      apiMsgs.pop();
+    }
+
+    // Asegurarse que los mensajes alternan correctamente user/assistant
+    const cleanMsgs = [];
+    for (const msg of apiMsgs) {
+      if (cleanMsgs.length === 0 || cleanMsgs[cleanMsgs.length - 1].role !== msg.role) {
+        cleanMsgs.push(msg);
+      }
     }
 
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: apiMsgs, system: buildSystemPrompt(s) }),
+        body: JSON.stringify({ messages: cleanMsgs, system: buildSystemPrompt(s) }),
       });
       const data = await res.json();
       const reply = data.reply || "No entendí bien. ¿Me lo preguntas de nuevo? 💛";
@@ -200,7 +222,6 @@ export default function ProfeSol() {
         button:hover{opacity:.85} button:active{transform:scale(.96)}
       `}</style>
 
-      {/* Header */}
       <div style={{ background: ac, padding: "12px 15px", display: "flex", alignItems: "center", gap: 11, flexShrink: 0, boxShadow: `0 3px 12px ${ac}55` }}>
         <div style={{ width: 46, height: 46, borderRadius: "50%", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, flexShrink: 0 }}>☀️</div>
         <div style={{ flex: 1 }}>
@@ -214,7 +235,6 @@ export default function ProfeSol() {
         <div style={{ fontSize: 22 }}>{s.emoji}</div>
       </div>
 
-      {/* Subject tabs */}
       <div style={{ display: "flex", gap: 5, padding: "7px 10px", overflowX: "auto", background: "rgba(255,255,255,.8)", borderBottom: "1px solid rgba(0,0,0,.06)", flexShrink: 0 }}>
         {SUBJECTS.map((sub, i) => (
           <button key={i} onClick={() => switchSub(i)} style={{
@@ -226,7 +246,6 @@ export default function ProfeSol() {
         ))}
       </div>
 
-      {/* Chat */}
       <div style={{ flex: 1, overflowY: "auto", padding: "12px 10px", display: "flex", flexDirection: "column", gap: 9 }}>
         {messages.map((m, i) => {
           if (m.role === "image-preview") return (
@@ -265,7 +284,6 @@ export default function ProfeSol() {
         <div ref={bottomRef} />
       </div>
 
-      {/* Quick questions */}
       <div style={{ padding: "6px 10px 5px", background: "rgba(255,255,255,.85)", borderTop: "1px solid rgba(0,0,0,.05)", flexShrink: 0 }}>
         <div style={{ fontSize: 10, color: "#999", fontWeight: 800, marginBottom: 4, textTransform: "uppercase", letterSpacing: ".5px" }}>💡 Pregunta rápida</div>
         <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
@@ -278,7 +296,6 @@ export default function ProfeSol() {
         </div>
       </div>
 
-      {/* Image preview bar */}
       {pendingImage && (
         <div style={{ padding: "5px 10px", background: "#fffde7", borderTop: "1px solid #fdd835", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
           <img src={pendingImage.previewUrl} style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 7, border: `2px solid ${ac}` }} alt="" />
@@ -287,9 +304,8 @@ export default function ProfeSol() {
         </div>
       )}
 
-      {/* Input bar */}
       <div style={{ display: "flex", gap: 6, padding: "8px 10px", background: "rgba(255,255,255,.95)", borderTop: `2px solid ${ac}44`, alignItems: "flex-end", flexShrink: 0 }}>
-        <input type="file" ref={fileRef} accept="image/*,.pdf" style={{ display: "none" }} onChange={handleFile} />
+        <input type="file" ref={fileRef} accept="image/*" style={{ display: "none" }} onChange={handleFile} />
         <button onClick={() => fileRef.current?.click()} style={{
           width: 40, height: 44, borderRadius: 12, border: `2px solid ${ac}`, color: ac,
           background: "transparent", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center",
